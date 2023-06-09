@@ -177,27 +177,11 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
 
             if dashed:
                 img_overlay = img.copy()
-                # img_overlay = cv2.line(
-                #     img_overlay,
-                #     (int(kp1[0]), int(kp1[1])),
-                #     (int(kp2[0]), int(kp2[1])),
-                #     color,
-                #     thickness=line_width,
-                #     lineType=cv2.LINE_AA,
-                # )
                 img_overlay = draw_line(img_overlay, kp1, kp2, color, line_type, thickness=line_width)
                 img = cv2.addWeighted(img_overlay, 0.4, img, 0.6, 0)
 
             else:
                 img = draw_line(img, kp1, kp2, color, line_type, thickness=line_width)
-                # img = cv2.line(
-                #     img,
-                #     (int(kp1[0]), int(kp1[1])),
-                #     (int(kp2[0]), int(kp2[1])),
-                #     color,
-                #     thickness=line_width,
-                #     lineType=cv2.LINE_AA,
-                # )
             
         return img
 
