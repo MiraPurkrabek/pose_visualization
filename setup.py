@@ -16,8 +16,8 @@ class PostInstallCmd(install):
 
 
 setup(
-    name="pose_visualization",
+    name="posevis",
     version="1.0",
-    packages=find_packages(exclude=None),
+    packages=find_packages(),
     cmdclass={"develop": PostDevelopCmd, "install": PostInstallCmd},
 )
