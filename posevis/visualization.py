@@ -1,5 +1,6 @@
 import numpy as np
 import cv2
+from copy import deepcopy
 
 NEUTRAL_COLOR = (52, 235, 107)
 
@@ -101,22 +102,56 @@ def draw_line(img, start, stop, color, line_type, thickness=1):
     return img
 
 
-def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers=True, show_bones=True, line_type="solid", width_multiplier=1.0):
+def pose_visualization(
+        img,
+        keypoints,
+        format="COCO",
+        greyness=1.0,
+        show_markers=True,
+        show_bones=True,
+        line_type="solid",
+        width_multiplier=1.0,
+        bbox_width_multiplier=1.0,
+        show_bbox=False,
+        differ_individuals=False,
+    ):
     """
     This function draws keypoints on the image
     """
     assert line_type.lower() in ["solid", "dashed", "doted"], "line_type should be either solid, dashed or doted"
     
-    if format.upper() != "COCO":
-        raise NotImplementedError("Only COCO format is supported for now")
-    
+    if format.upper() not in ["COCO", "OCHUMAN", "CROWDPOSE"]:
+        raise NotImplementedError("Only COCO, OCHuman and CrowdPose format is supported for now")
+
     bbox = None
     if isinstance(keypoints, dict):
         try:
             bbox = np.array(keypoints["bbox"]).flatten()
         except KeyError:
             pass
-        keypoints = keypoints["keypoints"]
+        keypoints = np.array(keypoints["keypoints"])
+
+    if format.upper() == "OCHUMAN":
+        keypoints = keypoints.reshape(-1, 3)
+        keypoints = keypoints[[16, 18, 17, 15, 14, 3, 0, 4, 1, 5, 2, 9, 6, 10, 7, 11, 8], :]
+
+        # Map visibilty to COCO format
+        new_keypoints = deepcopy(keypoints)
+        new_keypoints[keypoints[:, -1] == 0, -1] = 0
+        new_keypoints[keypoints[:, -1] == 1, -1] = 2
+        new_keypoints[keypoints[:, -1] == 2, -1] = 1
+        new_keypoints[keypoints[:, -1] == 3, -1] = 1
+
+        keypoints = new_keypoints.flatten()
+
+    elif format.upper() == "CROWDPOSE":
+        keypoints = keypoints.reshape(-1, 3)
+        keypoints = keypoints[[12, 12, 12, 13, 13, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], :]
+        keypoints = keypoints.flatten()
+
+        if bbox is not None:
+            bbox[2] += bbox[0]
+            bbox[3] += bbox[1]
 
     # If keypoints is a list of poses, draw them all
     if len(keypoints) % 17 != 0:
@@ -129,6 +164,9 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
                 show_markers=show_markers,
                 show_bones=show_bones,
                 line_type=line_type,
+                width_multiplier=width_multiplier,
+                show_bbox=show_bbox,
+                differ_individuals=differ_individuals,
             )
         return img
     
@@ -149,10 +187,16 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
     if num_valid_kpts == 0:
         return img
 
-    min_x = np.min(keypoints[keypoints[:, 0] > 0, 0])
-    min_y = np.min(keypoints[keypoints[:, 1] > 0, 1])
-    max_x = np.max(keypoints[keypoints[:, 0] > 0, 0])
-    max_y = np.max(keypoints[keypoints[:, 1] > 0, 1])
+    if bbox is None:
+        min_x = np.min(keypoints[keypoints[:, 0] > 0, 0])
+        min_y = np.min(keypoints[keypoints[:, 1] > 0, 1])
+        max_x = np.max(keypoints[keypoints[:, 0] > 0, 0])
+        max_y = np.max(keypoints[keypoints[:, 1] > 0, 1])
+    else:
+        min_x = bbox[0]
+        min_y = bbox[1]
+        max_x = bbox[2]
+        max_y = bbox[3]
 
     max_area = (max_x-min_x) * (max_y-min_y)
     line_width = max(int(np.sqrt(max_area) / 500 * width_multiplier), 1)
@@ -160,7 +204,11 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
     invisible_marker_size = max(int(np.sqrt(max_area) / 100), 1)
     marker_thickness = max(int(np.sqrt(max_area) / 100), 1)
 
-    if not bbox is None:
+    if differ_individuals:
+        instance_color = np.random.randint(0, 255, size=(3, )).tolist()
+        instance_color = tuple(instance_color)
+
+    if show_bbox and not (bbox is None):
         pts = [
             (bbox[0], bbox[1]),
             (bbox[0], bbox[3]),
@@ -169,15 +217,21 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
             (bbox[0], bbox[1]),
         ]
         for i in range(len(pts)-1):
-            img = draw_line(img, pts[i], pts[i+1], (0, 255, 0), line_type, thickness=line_width)
+            if differ_individuals:
+                img = draw_line(img, pts[i], pts[i+1], instance_color, "doted", thickness=line_width)
+            else:
+                img = draw_line(img, pts[i], pts[i+1], (0, 255, 0), line_type, thickness=line_width)
 
     if show_markers:
         for kpt, marker_info in zip(keypoints, COCO_MARKERS):
             if kpt[0] == 0 and kpt[1] == 0:
                 continue
 
-            color = marker_info[2] if kpt[2] == 2 else(140, 140, 140, 255)
-            
+            if differ_individuals:
+                color = instance_color if kpt[2] == 2 else (140, 140, 140)
+            else:
+                color = marker_info[2] if kpt[2] == 2 else (140, 140, 140)
+
             if kpt[2] == 1:
                 img_overlay = img.copy()
                 img_overlay = cv2.drawMarker(
@@ -209,7 +263,11 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
                 continue
             
             dashed = kp1[2] == 1 or kp2[2] == 1
-            color = np.array(bone_info[1])
+            
+            if differ_individuals:
+                color = np.array(instance_color)
+            else:
+                color = np.array(bone_info[1])
             color = (color * greyness).astype(int).tolist()
 
             if dashed:
@@ -219,8 +277,8 @@ def pose_visualization(img, keypoints, format="COCO", greyness=1.0, show_markers
 
             else:
                 img = draw_line(img, kp1, kp2, color, line_type, thickness=line_width)
-            
-        return img
+
+    return img
 
 
 if __name__ == "__main__":
